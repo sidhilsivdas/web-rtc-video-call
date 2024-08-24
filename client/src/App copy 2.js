@@ -5,59 +5,56 @@ function App() {
   const pc = useRef(null);
   const localVideoRef = useRef(null);
   const remoteVideoRef = useRef(null);
+  
   const [messageQueue, setMessageQueue] = useState([]);
-  const isSocketOpenRef = useRef(false); // Use ref to track WebSocket state
+  const [isSocketOpen, setSocketOpen] = useState(false);
 
   const urlParams = new URLSearchParams(window.location.search);
   const username = urlParams.get('user');
 
   useEffect(() => {
-    const wsUrl = "wss://api-meetingroom.talksandtalks.ai/ws/meeting/9f423c1f-e631-45a2-b7ab-b717e9fa66f4/";
+    // Initialize WebSocket
+    socket.current = new WebSocket("wss://api-meetingroom.talksandtalks.ai/ws/meeting/9f423c1f-e631-45a2-b7ab-b717e9fa66f4/");
+    //socket.current = new WebSocket('ws://localhost:8000');
+    const currentSocket = socket.current;
 
-    const connectWebSocket = () => {
-      socket.current = new WebSocket(wsUrl);
-
-      socket.current.addEventListener("open", handleOpen);
-      socket.current.addEventListener("message", handleMessage);
-      socket.current.addEventListener("error", handleSocketError);
-      socket.current.addEventListener("close", handleClose);
+    const handleOpen = () => {
+      console.log("WebSocket connected");
+      setSocketOpen(true);
+      messageQueue.forEach(data => {
+        sendData(data);
+      });
+      setMessageQueue([]);
+      
     };
 
-    connectWebSocket();
+    const handleMessage = (event) => {
+      
+      let jsonData = JSON.parse(event.data);
+      
+      signalingDataHandler(jsonData);
+    };
+
+    const handleSocketError = (event) => {
+      console.log("error", event)
+      
+    };
+
+
+    currentSocket.addEventListener("open", handleOpen);
+    currentSocket.addEventListener("message", handleMessage);
+    currentSocket.addEventListener("error", handleSocketError);
 
     return () => {
-      if (socket.current) {
-        socket.current.removeEventListener("open", handleOpen);
-        socket.current.removeEventListener("message", handleMessage);
-        socket.current.removeEventListener("error", handleSocketError);
-        socket.current.removeEventListener("close", handleClose);
-        pc.current?.close();
-        socket.current.close();
-      }
+      currentSocket.removeEventListener("open", handleOpen);
+      currentSocket.removeEventListener("message", handleMessage);
+      pc.current?.close();
+      currentSocket.close();
+      if (currentSocket.readyState === 1) { // <-- This is important
+        currentSocket.close();
+    }
     };
-  }, []);
-
-  const handleOpen = () => {
-    console.log("WebSocket connected");
-    isSocketOpenRef.current = true; // Update ref to indicate socket is open
-    processMessageQueue(); // Process any queued messages
-  };
-
-  const handleMessage = (event) => {
-    let jsonData = JSON.parse(event.data);
-    signalingDataHandler(jsonData);
-  };
-
-  const handleSocketError = (event) => {
-    console.error("WebSocket error: ", event);
-  };
-
-  const handleClose = (event) => {
-    console.log("WebSocket closed: ", event);
-    isSocketOpenRef.current = false; // Update ref to indicate socket is closed
-    // Optionally, attempt to reconnect
-    // setTimeout(() => connectWebSocket(), 5000); // Example reconnect after 5 seconds
-  };
+  }, [messageQueue]);
 
   const startConnection = () => {
     navigator.mediaDevices
@@ -69,29 +66,25 @@ function App() {
         console.log("Local Stream found");
         localVideoRef.current.srcObject = stream;
 
-        if (isSocketOpenRef.current) {
+        if (isSocketOpen) {
           console.log("Socket is already open");
-          sendData({ type: "join", username });
+          sendData({type: "join", username});
         } else {
-          console.log("Socket is not open yet");
-          setMessageQueue(prevQueue => [...prevQueue, { type: "join", username }]);
+          console.log("Socket is not open yet queueing messages");
+          // Queue the message if socket is not open
+          setMessageQueue(prevQueue => [...prevQueue, {type: "join", username}]);
         }
+
+        // if (socket.current.readyState === WebSocket.OPEN) {
+        //   console.log("Socket is already open");
+        //   sendData({type:"join", username});
+        // }else{
+        //   console.log("socket is not open",socket.current.readyState, WebSocket.OPEN)
+        // }
       })
       .catch((error) => {
         console.error("Stream not found: ", error);
       });
-  };
-
-  const processMessageQueue = () => {
-    if (isSocketOpenRef.current) {
-      setMessageQueue(prevQueue => {
-        prevQueue.forEach(data => {
-          console.log("Sending queued message", data);
-          socket.current.send(JSON.stringify(data));
-        });
-        return []; // Clear the queue after sending messages
-      });
-    }
   };
 
   const onIceCandidate = (event) => {
@@ -167,7 +160,7 @@ function App() {
   };
 
   const signalingDataHandler = (data) => {
-    console.log("Message received", data);
+    console.log("message recieved",data);
     if (data.type === "join") {
       console.log("Ready to Connect!");
       createPeerConnection();
@@ -186,18 +179,9 @@ function App() {
   };
 
   const sendData = (data) => {
-    if (isSocketOpenRef.current) {
-      console.log("Sending message", data);
-      socket.current.send(JSON.stringify(data));
-    } else {
-      console.log("Socket is not open. Queuing message.");
-      setMessageQueue(prevQueue => [...prevQueue, data]);
-    }
+    console.log("sending message", data);
+    socket.current.send(JSON.stringify(data));
   };
-
-  useEffect(() => {
-    processMessageQueue(); // Process the queue when WebSocket is open
-  }, [isSocketOpenRef.current]); // Trigger queue processing when WebSocket state changes
 
   useEffect(() => {
     startConnection();
