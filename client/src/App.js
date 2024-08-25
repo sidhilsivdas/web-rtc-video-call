@@ -7,40 +7,42 @@ function App() {
   const remoteVideoRef = useRef(null);
   const [messageQueue, setMessageQueue] = useState([]);
   const isSocketOpenRef = useRef(false); // Use ref to track WebSocket state
+  const reconnectInterval = useRef(null);
 
   const urlParams = new URLSearchParams(window.location.search);
   const username = urlParams.get('user');
 
-  useEffect(() => {
-    const wsUrl = "wss://api-meetingroom.talksandtalks.ai/ws/meeting/9f423c1f-e631-45a2-b7ab-b717e9fa66f4/";
+  const connectWebSocket = () => {
+    //const wsUrl = "wss://api-meetingroom.talksandtalks.ai/ws/meeting/9f423c1f-e631-45a2-b7ab-b717e9fa66f4/";
+    const wsUrl = "ws://localhost:8000";
+    if (socket.current) {
+      console.log("web socket current exits , removing liseners");
+      socket.current.removeEventListener("open", handleOpen);;
+      socket.current.removeEventListener("message", handleMessage);
+      socket.current.removeEventListener("error", handleSocketError);
+      socket.current.removeEventListener("close", handleClose);
+      socket.current.close();
+    }
 
-    const connectWebSocket = () => {
-      socket.current = new WebSocket(wsUrl);
+    console.log("web socket current not exits , creating liseners")
+    socket.current = new WebSocket(wsUrl);
 
-      socket.current.addEventListener("open", handleOpen);
-      socket.current.addEventListener("message", handleMessage);
-      socket.current.addEventListener("error", handleSocketError);
-      socket.current.addEventListener("close", handleClose);
-    };
+    socket.current.addEventListener("open", handleOpen);
+    socket.current.addEventListener("message", handleMessage);
+    socket.current.addEventListener("error", handleSocketError);
+    socket.current.addEventListener("close", handleClose);
+  };
 
-    connectWebSocket();
-
-    return () => {
-      if (socket.current) {
-        socket.current.removeEventListener("open", handleOpen);
-        socket.current.removeEventListener("message", handleMessage);
-        socket.current.removeEventListener("error", handleSocketError);
-        socket.current.removeEventListener("close", handleClose);
-        pc.current?.close();
-        socket.current.close();
-      }
-    };
-  }, []);
+  
 
   const handleOpen = () => {
     console.log("WebSocket connected");
-    isSocketOpenRef.current = true; // Update ref to indicate socket is open
-    processMessageQueue(); // Process any queued messages
+    isSocketOpenRef.current = true;
+    startConnection()
+    //processMessageQueue();
+    if (reconnectInterval.current) {
+      clearInterval(reconnectInterval.current);
+    }
   };
 
   const handleMessage = (event) => {
@@ -54,9 +56,14 @@ function App() {
 
   const handleClose = (event) => {
     console.log("WebSocket closed: ", event);
-    isSocketOpenRef.current = false; // Update ref to indicate socket is closed
-    // Optionally, attempt to reconnect
-    // setTimeout(() => connectWebSocket(), 5000); // Example reconnect after 5 seconds
+    isSocketOpenRef.current = false;
+    // Attempt to reconnect with exponential backoff
+    let delay = 1000; // Start with a 1-second delay
+    reconnectInterval.current = setInterval(() => {
+      console.log("Attempting to reconnect...");
+      connectWebSocket();
+      delay = Math.min(delay * 2, 30000); // Exponential backoff, max 30 seconds
+    }, delay);
   };
 
   const startConnection = () => {
@@ -74,7 +81,7 @@ function App() {
           sendData({ type: "join", username });
         } else {
           console.log("Socket is not open yet");
-          setMessageQueue(prevQueue => [...prevQueue, { type: "join", username }]);
+          //setMessageQueue(prevQueue => [...prevQueue, { type: "join", username }]);
         }
       })
       .catch((error) => {
@@ -83,6 +90,7 @@ function App() {
   };
 
   const processMessageQueue = () => {
+    console.log("process queue called")
     if (isSocketOpenRef.current) {
       setMessageQueue(prevQueue => {
         prevQueue.forEach(data => {
@@ -148,7 +156,7 @@ function App() {
 
   const setAndSendLocalDescription = (sessionDescription) => {
     pc.current.setLocalDescription(sessionDescription);
-    console.log("Local description set");
+    console.log("Local description set", sessionDescription);
     sendData(sessionDescription);
   };
 
@@ -196,12 +204,29 @@ function App() {
   };
 
   useEffect(() => {
-    processMessageQueue(); // Process the queue when WebSocket is open
-  }, [isSocketOpenRef.current]); // Trigger queue processing when WebSocket state changes
-
-  useEffect(() => {
-    startConnection();
+    console.log("first use effect");
+    connectWebSocket();
+    return () => {
+      if (socket.current) {
+        socket.current.removeEventListener("open", handleOpen);
+        socket.current.removeEventListener("message", handleMessage);
+        socket.current.removeEventListener("error", handleSocketError);
+        socket.current.removeEventListener("close", handleClose);
+        pc.current?.close();
+        socket.current.close();
+      }
+    };
   }, []);
+
+  // useEffect(() => {
+  //   console.log("second use effect, calling process queue");
+  //   processMessageQueue(); // Process the queue when WebSocket is open
+  // }, [isSocketOpenRef.current]); // Trigger queue processing when WebSocket state changes
+
+  // useEffect(() => {
+  //   console.log("third use effect, adding remte stream");
+  //   startConnection();
+  // }, []);
 
   return (
     <div>
