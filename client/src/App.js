@@ -13,8 +13,8 @@ function App() {
   const username = urlParams.get('user');
 
   const connectWebSocket = () => {
-    //const wsUrl = "wss://api-meetingroom.talksandtalks.ai/ws/meeting/9f423c1f-e631-45a2-b7ab-b717e9fa66f4/";
-    const wsUrl = "ws://localhost:8000";
+    const wsUrl = "wss://api-meetingroom.talksandtalks.ai/ws/meeting/9f423c1f-e631-45a2-b7ab-b717e9fa66f4/";
+    //const wsUrl = "ws://localhost:8000";
     if (socket.current) {
       console.log("web socket current exits , removing liseners");
       socket.current.removeEventListener("open", handleOpen);;
@@ -31,6 +31,15 @@ function App() {
     socket.current.addEventListener("message", handleMessage);
     socket.current.addEventListener("error", handleSocketError);
     socket.current.addEventListener("close", handleClose);
+  };
+
+  const stopLocalMedia = () => {
+    const stream = localVideoRef.current.srcObject;
+    if (stream) {
+      stream.getTracks().forEach(track => track.stop()); // Stop all tracks
+      localVideoRef.current.srcObject = null; // Clear the video element source
+      console.log("Local media stopped");
+    }
   };
 
   
@@ -57,6 +66,7 @@ function App() {
   const handleClose = (event) => {
     console.log("WebSocket closed: ", event);
     isSocketOpenRef.current = false;
+    stopLocalMedia(); // Stop local video stream
     // Attempt to reconnect with exponential backoff
     let delay = 1000; // Start with a 1-second delay
     reconnectInterval.current = setInterval(() => {
